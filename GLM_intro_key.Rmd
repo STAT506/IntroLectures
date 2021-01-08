@@ -1,0 +1,158 @@
+---
+title: "Overview of Generalized Linear Models"
+output: pdf_document
+---
+
+\renewcommand{\vec}[1]{\mathbf{#1}}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.height = 4, fig.width = 6, fig.align = 'center')
+library(tidyverse) 
+library(rstanarm)
+library(arm)
+library(gridExtra)
+set.seed(11012020)
+```
+
+Logistic regression is a special case of *a generalized linear model*
+
+\vfill
+
+### Logistic Regression
+
+The logistic function maps an input from the unit range (0,1) to the real line:
+
+__$$logit(x) = \log \left(\frac{x}{1-x}\right)$$__
+
+\vfill
+
+More importantly, the inverse-logit function maps a continous variable to the unit range (0,1)
+
+__$$logit(x)^{-1} = \frac{\exp(x)}{1 + \exp(x)}$$.__
+
+\vfill
+
+The `qlogis` (for logit) and `plogis` (inverse-logit) functions in R can be used for this calculation. For instance `plogis(1) =` `r plogis(1)`.
+
+\vfill
+
+Formally, the inverse-logistic function is used as part of the GLM:
+
+\begin{align}
+y & \sim Bernoulli\\
+Pr(y_i = 1) & = \pi_i = logit^{-1}(X\underline{\beta})
+\end{align}
+
+\vfill
+
+*Note there is not an $\epsilon$ term in this model. The randomness comes from the Bernoulli distribution.*
+
+\newpage
+
+Recall the `beer` dataset, but now instead of trying to model consumption, lets consider whether a day is a weekday or weekend.
+
+```{r, message = F}
+beer <- read_csv('http://math.montana.edu/ahoegh/Data/Brazil_cerveja.csv') %>%
+  mutate(consumed = consumed - mean(consumed))
+```
+
+\vfill
+
+```{r}
+bayes_logistic <- stan_glm(weekend ~ consumed, data = beer,
+                           family = binomial(link = "logit"), refresh = 0)
+```
+
+
+\vfill
+
+Now how to interpret the model coefficients? 
+
+```{r}
+bayes_logistic
+```
+\vfill
+
+
+Interpreting the coefficients can be challenging due to the non-linear relationship between the outcome and the predictors. 
+
+\newpage
+
+### Predictive interpretation
+
+One way to interpret the coefficients is in a predictive standpoint.  For instance, consider an day with average consumption, then the probability of a weekend would be `invlogit(-1.2 + 0.3 * 0) =` `r round(plogis(-1.2),2)`, where as the probability of a day with 10 more liters of consumption (relative to an average day) would have a weekend probability of `invlogit(-1.2 + 0.3 * 10) =` `r round(plogis(-1.2 + 0.3 * 10),2)`
+
+\vfill
+
+Of course, we should always think about uncertainty, so we can extract simulations from the model. 
+
+\vfill
+
+`posterior_linpred` was useful with regression, but need `posterior_epred` here
+```{r}
+new_data <- data.frame(consumed = c(0,10))
+posterior_sims <- posterior_epred(bayes_logistic, newdata = new_data)
+summary(posterior_sims)
+```
+
+\vfill
+
+It can also be useful to consider predictions of an individual data point. *This is how you would conduct posterior predictive checks.*
+
+```{r}
+new_obs <- posterior_predict(bayes_logistic, newdata = new_data)
+head(new_obs)
+colMeans(new_obs)
+```
+
+\newpage
+
+### odds ratios and log odds
+
+logistic regression can be re-written as
+
+\begin{align}
+y & \sim Bernoulli\\
+\log \left( \frac{Pr[y = 1|X]}{Pr[y = 0|X]} \right)& = \beta_0 + \beta_1 x \\
+\log \left( \frac{Pr[y = 1|X]}{1-Pr[y = 1|X]} \right)& = \beta_0 + \beta_1 x \\
+\end{align}
+
+_Thus, a one unit change in $x$ increases the log odds of $y$ by a factor of $\beta_1$_
+
+\vfill
+
+Furthermore, logistic regression can also re-written as
+
+\begin{align}
+y & \sim Bernoulli\\
+\log \left( \frac{Pr[y = 1|X]}{Pr[y = 0|X]} \right)& = \beta_0 + \beta_1 x \\
+\frac{Pr[y = 1|X]}{1-Pr[y = 1|X]}& = \exp \left(\beta_0 + \beta_1 x \right)\\
+\end{align}
+
+\vfill
+_Then consider $\exp{\beta_1}$_
+\vfill
+
+\begin{align}
+\exp(\beta_1) &= \frac{\exp(\beta_0 + \beta_1 (x + 1))}{\exp(\beta_0 + \beta_1 (x))}\\
+&= \frac{Pr[y = 1|X= x + 1]/Pr[y = 0|X= x + 1]}{Pr[y = 1|X= x]/Pr[y = 0|X= x]}
+\end{align}
+
+_hence, this can be interpreted as an odds ratio_
+
+\vfill
+
+Interpretation of log odds and odds ratios can be difficult; however, interpreting the impact on probabilities requires setting other parameter values and the change is non-linear (different change in probability for a one unit change in a predictor).
+
+\newpage
+
+### Model Comparison
+
+We can use cross validation in the same manner a standard linear models.
+
+```{r}
+loo(bayes_logistic)
+
+temp_model <- stan_glm(weekend~max_tmp, data = beer, refresh=0)
+loo(temp_model)
+```
